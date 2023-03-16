@@ -1,7 +1,7 @@
 # Analysis of Factors Related to Systolic Blood Pressure in NHANES Data 2013-2014
 BMI715 Final Project of Katrina Liu
 
-The project code is stored at `BMI715_final_project_katrina_liu.Rmd`. The full description and analysis done in the project is stored at `BMI715_final_project_katrina_liu.pdf`. A knitted version of html file is stored at `BMI715_final_project_katrina_liu.html`.
+The project code is stored at `BMI715_final_project_katrina_liu.Rmd`. The full description and analysis done in the project is stored at `BMI715_final_project_katrina_liu_writeup.pdf`. A knitted version of html file is stored at `BMI715_final_project_katrina_liu.html`.
 ## Description
 Hypertension has been known to increase the risk for conditions including heart disease, heart attack, stroke, and etc (“High blood pressure (hypertension),” 2022). Diagnostic of hypertension is focused on systolic blood pressure level and the diastolic blood pressure level. The effect of treatment of hypertension greatly reflects on how these blood pressure levels change.
 
