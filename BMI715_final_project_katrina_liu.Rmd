@@ -1,0 +1,324 @@
+---
+title: "Final Project"
+author: "Katrina Liu"
+date: '2022-12-10'
+output:
+  word_document: default
+  html_document: default
+  pdf_document: default
+bibliography: references.bib
+csl: https://raw.githubusercontent.com/citation-style-language/styles/master/research-institute-for-nature-and-forest.csl
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(MASS)
+```
+
+# BMI 715 Final Project
+
+## Motivation
+
+Hypertension has been known to increase the risk for conditions including heart disease, heart attack, stroke, and etc [@mayo]. Diagnostic of hypertension is focused on systolic blood pressure level and the diastolic blood pressure level. The treatment of hypertension greatly depends on how the blood pressure level change. Motivated by this, in this project, we want to study which factors are associated with the systolic blood pressure level and build a predictive model for the systolic blood pressure level using the variables for the cohort that is already diagnosed with hypertension using the NHANES data [@nhanes]. The result of the study would be useful in better adjusting treatment plan.
+
+```{r}
+# Loading the NHANES Dataset
+nhanes = read.csv("nhanes_13_14_subset_updated.csv", row.names = "X")
+```
+
+### Systolic Blood Pressure Related Variables
+
+There can be several different criteria of determine the hypertension cohort. However, given that we are taking into account the medication intake, the individual should be aware that they are hypertension. Therefore, we choose the variable BPQ020, a questionnaire variable indicating whether the individual has been told they have hypertension to filter out the hypertension cohort we want to investigate.
+
+| Variable Name | Variable Description                                                                                                                         |
+|----------------|--------------------------------------------------------|
+| BPQ020        | {Have you/Has SP} ever been told by a doctor or other health professional that {you/s/he} had hypertension, also called high blood pressure? |
+
+The dependent variable would be the systolic blood pressure level and is well characterized into the variable BPXSY1 in the NHANES data set. 
+
+| Dependent Variable Name | Variable Description                           |
+|-------------------------|------------------------------------------------|
+| BPXSY1                  | Systolic: Blood pressure (first reading) mm Hg |
+
+To select the predictors, we first included common demographic variables including age, sex, BMI. Commonly seen lab test variables such as total protein level, serum glucose level, and total cholesterol level are included as well. Blood pressure related examination variables such as 60s pulse, diastolic blood pressure, and maximum inflation levels.
+
+One study, in particular, investigated whether medication would affect the systolic blood pressure level [@pmid30563873]. Indeed, taking hypertension treatment medications could potentially lead to changes in the systolic blood pressure. Therefore, it is being included as one indicator predictor variable.
+
+
+
+| Predictor Variable Name | Variable Description                                                                                               |
+|------------------|------------------------------------------------------|
+| RIAGENDR                | Gender of the participant                                                                                          |
+| RIDAGEYR                | Age in years of the participant at the time of screening. Individuals 80 and over are topcoded at 80 years of age. |
+| BMXBMI                  | Body Mass Index                                                                                                    |
+| LBXSTP                  | Total protein (g/dL)                                                                                               |
+| LBXSGL                  | Glucose, refrigerated serum (mg/dL)                                                                                |
+| LBXTC                   | Total Cholesterol( mg/dL)                                                                                          |
+| BPXPLS                  | 60 sec. pulse (30 sec. pulse \* 2)                                                                                 |
+| BPXDI1                  | Diastolic: Blood pressure (first reading) mm Hg                                                                    |
+| BPXML1                  | MIL: maximum inflation levels (mm Hg)                                                                              |
+| BPQ100D                 | (Are you/Is SP) now following this advice to take prescribed medicine?                                             |
+
+
+
+## Data Processing and Exploratory Analysis
+
+### Remove Invalid Data Point
+
+We first filter out all of the datapoint that include at least one NA value for the variables we selected. While pre-processing the data, we realized that there are noticeable invalid data that should be left out to avoid their misleading effect on the result. The data being left out of the study includes: age = 80 (all age \> 80 are being recorded as 80), systolic blood pressure = 0 (should not be true), diastolic blood pressure = 0 (should not be true).
+
+```{r}
+# Filter the cohort with hypertension
+nhanes_ht = nhanes %>% filter(BPQ020 == 2, BPXDI1>0, BPXSY1>0, RIDAGEYR<80) 
+nhanes_ht_related = nhanes_ht %>% 
+  dplyr::select(c("BMXBMI", "RIDAGEYR", "LBXTC","LBXSGL","LBXSTP",
+                  "BPXSY1","BPXML1","BPXPLS", "BPXDI1", "BPQ100D",
+                                                  "RIAGENDR")) %>% 
+  drop_na %>% mutate(BPQ100D = BPQ100D-1, RIAGENDR = RIAGENDR-1)
+head(nhanes_ht_related)
+```
+
+### Scaling the Predictors
+
+We scaled the continuous variables so that they are on the same scale of mean 0 and variance 1 and leave the binary indicator variable untouched.
+
+```{r}
+# Scale continuous variables
+nhanes_ht_ready = nhanes_ht_related[1:9] %>% scale %>% as.data.frame
+nhanes_ht_ready = cbind(nhanes_ht_ready, nhanes_ht_related[10], 
+                        nhanes_ht_related[11])
+
+```
+
+### Relationships Between Variables
+
+Lastly, we want to verify that there is no correlation or dependence between the predictor variables. Here, we plot out the relationships and correlation coefficients between each pair of predictor variables. Based on the figures, it seems that there is no relationship between the predictor variables and we can proceed to building the predicting model.
+
+```{r, fig.height = 8, fig.width = 10}
+# Plot collinearity and correlation between predictors
+plot(nhanes_ht_ready[,-6], 
+     main="Relationships between Each Pair of Predictors")
+heatmap(cor(nhanes_ht_ready[,-6]),
+        main = "Correlation coefficients of Each Pair of Predictors",Colv=NA, 
+        Rowv=NA)
+
+```
+
+## Linear Regression Model
+
+### Assessing the Relationship between the Predictors and the Outcome
+If we look specifically for the row and column with BPXSY1, we see that seemlingly the relationship of it and BPXML1 looks linear. Other variables seem to not have a linear relationship with the systolic blood pressure and therefore violates the assumption of linear regression. However, we decide to still include them in the model so that their impact could be assessed. 
+```{r, fig.height = 8, fig.width = 10}
+# Plot collinearity and coefficient of all variables
+plot(nhanes_ht_ready, main="Relationships between Each Pair of Variables")
+```
+We would further assess if BPXML1 and BPXSY1 follows all of the constraints of a linear relationship. We see that the residuals have a normal distribution centered at 0 and have similar variances of 1 for each fitted values. Each data point is independent. Therefore, BPXML1 and BPXSY1 have a linear relationship.
+```{r, fig.height = 8, fig.width = 10}
+# Assees the linear relationship between BPXSY1 and BPXML1
+plot(lm(BPXSY1~BPXML1, data=nhanes_ht_ready))
+```
+Since the dependent variable, systolic blood pressure, is continuous, I use the linear regression model to characterize its relationship with the predictors. I start by including all of the variables in a linear regression model to see how the model performs.
+
+```{r, fig.height = 8, fig.width = 10}
+# Full model
+lm.full = lm(BPXSY1~.,data=nhanes_ht_ready)
+summary(lm.full)
+```
+
+From the summary of the full model, we see that there are three variables with coefficients of significant P-values: the estimated coefficient of variable BPXML1 (maximum inflation level) is 0.793 with a very significant P-value less than 2e-16 indicating that the systolic blood pressure level increases with the maximum inflation level (0.793 unit of systolic blood pressure level per 1 unit of maximum inflation level); the estimated coefficient of variable BPXDI1 (diastolic blood pressure) is 0.112 with a significant P-value 0.000442 indicating that the systolic blood pressure level increases with the diastolic blood pressure level (0.112 unit of systolic blood pressure level per 1 unit of diastolic blood pressure level); and the estimated coefficient of variable RIAGENDR (gender) is 0.136 with a significant P-value less than 0.031 indicating that the systolic blood pressure level of the samples of gender group 0 is less than that of gender 1 (after processing, original gender group 1 = gender group 0, original gender group 2 = gender group 1).
+
+Together, the model explains 71% of the variance of the changes in systolic blood level of the individuals who has been informed of having hypertension.
+
+```{r, fig.height = 8, fig.width = 10}
+# Assess the full model
+plot(lm.full)
+```
+
+Plotting out the full model, we see that residuals is distributed centered at 0 with variance approximately 1. The variances look approximately the same for each fitted value. All of data points are independent. The Q-Q plot of the residuals and the normal distribution indicates that the standardized residuals fitted almost perfectly to the normal distribution. Therefore, the full model seems to be capturing the changes of the systolic blood pressure level well through a linear relationship with the predictor variables.
+
+### Variable Selection
+
+I performed the step-wise model selection of both directions elimination by AIC to find the model with the most relevant variables contributing to systolic blood pressure.
+
+```{r}
+# Base model
+lm.base = lm(BPXSY1~1,data=nhanes_ht_ready)
+summary(lm.base)
+```
+
+```{r}
+# Step-wise model selection
+lm.step =stepAIC(lm.full, scope=list(lm.base, lm.full), direction = "both")
+summary(lm.step)
+```
+
+The final model selected by the step-wise AIC metric contains variables RIDAGEYR (age), RIAGENDR (gender), BPXDI1 (diastolic blood pressure level), and BPXML1 (maximum inflation level). We see that the coefficients of BPXML1 and RIAGENDR slightly increase and that of BPXDI1 slight decreases. From the previous analysis of the full model, the variable RIDAGEYR was not included in one of the significant variables based on the P-value, and still it does not have a significant P-value when the threshold is at 0.05 but it is included in the final model selected by step-wise iterative selection. The multiple R-squared of the selected model is of 0.706 which is slightly lower than that of the full model of 0.7102 and the adjusted R-squared is 0.7026 of the selected model which is higher the adjusted R-squared of the full model of 0.7016, indicating adding the rest of the variables does not improve the model as expected.
+
+## Evaluate Model Fit
+
+### Plotting the Residuals
+
+```{r, fig.height = 8, fig.width = 10}
+# Residual plot
+plot(fitted(lm.step), resid(lm.step), main="Residual Plot")
+```
+
+The residuals of the selected model is normally distributed and centered at 0 with variance about 1 for all fitted values, indicating the model captures well the changes of systolic blood pressure.
+### Evalution with RMSE and MAE
+RMSE (root mean squared error) and MAE (mean absolute error) are metrics to assess the the performances of linear regression model. Both of them assess the errors of the models, implying the smaller the value of the metrics are, the better the model performs.
+
+To evaluate the model with the metric RMSE and MAE, We first partition our data set into the training data set and the testing data set with a proportion of 4:1. We first create a training model on the selected variables on the training data and predict on the testing data set to obtain RMSE and MAE on the testing data.
+
+```{r}
+library(Metrics)
+library(caret)
+
+# Partition training/testing data
+random_sample = createDataPartition(nhanes_ht_ready$BPXSY1, p=0.8, list=FALSE)
+training_data = nhanes_ht_ready[seq(random_sample),]
+testing_data = nhanes_ht_ready[-seq(random_sample),]
+
+# Train selected model and predict
+lm.train = lm(BPXSY1~RIDAGEYR+RIAGENDR+BPXDI1+BPXML1, data=training_data)
+predictions = predict(lm.train, testing_data)
+
+# Output results
+data.frame( RMSE = rmse(predictions, testing_data$BPXSY1),
+            MAE = mae(predictions, testing_data$BPXSY1))
+```
+
+We want to train a full model to obtain the RMSE and MAE of the full model to compare them with the selected model.
+
+```{r}
+# Train full model and predict
+lm.train.full = lm(BPXSY1~., data=training_data)
+full_predictions = predict(lm.train.full, testing_data)
+
+data.frame( RMSE = rmse(full_predictions, testing_data$BPXSY1),
+            MAE = mae(full_predictions, testing_data$BPXSY1))
+```
+
+We see that the RMSE and MAE of the selected training model are slightly lower than those of the full training model, indicating the selected model perform better on strange data set after training and the previous higher multiple R-squared of the full model is partially affected by over fitting.
+
+## Alternative Models: Regularization
+
+Regularization is another popular regression model to fit the data and prevent over-fitting. We want to see how each regularization penalty performs with the model.
+
+```{r, fig.height = 8, fig.width = 10}
+library(glmnet)
+# Process the ht as a matrix
+ht_mat = nhanes_ht_ready %>% as.matrix
+
+# Perform different penalties
+cv_model_lasso = cv.glmnet(ht_mat[,-6], ht_mat[,6], nfolds=10,alpha=1)
+cv_model_ridge = cv.glmnet(ht_mat[,-6], ht_mat[,6], nfolds=10,alpha=0)
+cv_model_elastic = cv.glmnet(ht_mat[,-6], ht_mat[,6], nfolds=10,alpha=0.5)
+
+# Plot the results
+plot(cv_model_lasso, 
+     main="Performance of the Regularized Regression with L1 Penalty")
+plot(cv_model_ridge,
+     main="Performance of the Regularized Regression with L2 Penalty")
+plot(cv_model_elastic, 
+     main="Performance of the Regularized Regression with Elastic Net")
+```
+
+We train the models on the same training data and predict on the test data set to see their performance.
+
+```{r}
+train_mat = training_data %>% as.matrix
+test_mat = testing_data %>% as.matrix
+
+# Train regularized regression model with optimal lambda
+cv_final_lasso = glmnet(train_mat[,-6], train_mat[,6], nfolds=10,
+                        alpha=1, lambda=cv_model_lasso$lambda.min)
+cv_final_ridge = glmnet(train_mat[,-6], train_mat[,6], nfolds=10,
+                        alpha=0, lambda=cv_model_ridge$lambda.min)
+cv_final_elastic = glmnet(train_mat[,-6], train_mat[,6], nfolds=10,
+                          alpha=0.5, lambda=cv_model_elastic$lambda.min)
+
+# Predict
+predictions_lasso = cv_final_lasso %>% predict(test_mat[,-6]) %>% as.vector()
+predictions_ridge = cv_final_ridge %>% predict(test_mat[,-6]) %>% as.vector()
+predictions_elastic = cv_final_elastic %>% predict(test_mat[,-6])%>% 
+  as.vector()
+
+# Output results
+data.frame(RMSE = rmse(predictions_lasso, test_mat[,6]), 
+           MAE = mae(predictions_lasso, test_mat[,6]))
+data.frame(RMSE = rmse(predictions_ridge, test_mat[,6]), 
+           MAE = mae(predictions_ridge, test_mat[,6]))
+data.frame(RMSE = rmse(predictions_elastic, test_mat[,6]), 
+           MAE = mae(predictions_elastic, test_mat[,6]))
+```
+
+To summarize, the regression model with lasso regularization performs the best with the lowest RMSE and MAE among the three regularization method. However, they are still worse than the performance of the selected model.
+
+## Follow-up Study:
+
+### Discarding Age Variable
+
+We wonder for the selected model, the included indicator variable age does not have a significant P-value for its coefficient. Whether we should include it in the model needs to be further investigated.
+
+```{r}
+# Build model without age
+lm.no_age = lm(BPXSY1~RIAGENDR+BPXDI1+BPXML1, data=nhanes_ht_ready)
+summary(lm.no_age)
+
+# Train and predict
+lm.train.no_age = lm(BPXSY1~RIAGENDR+BPXDI1+BPXML1, data=training_data)
+predictions_no_age = predict(lm.train, testing_data)
+data.frame( RMSE = rmse(predictions_no_age, testing_data$BPXSY1),
+            MAE = mae(predictions_no_age, testing_data$BPXSY1))
+```
+
+The adjusted R squared of the model without age is slightly lower than it of the model with age, indicating that adding the age variable improves the model as expected. We see that for the trained model with the variable age, the RMSE and MAR are the same with them of the trained model without the variable age, indicating adding the variable age does not damage the trained model's performance on strange data set. However, from this partition of training data and testing data, the model with age does not improve the performance as well to reflect the more variance it explained comparing with the model without age.
+
+### Effect of BP Medications
+
+We are specific interested in the relationship between the impact of use of medications on the systolic blood pressure in this group with diagnosed hypertension. Looking directly at the histograms, the distributions look identical.
+
+
+```{r, fig.height = 8, fig.width = 10}
+# Separate the cohort by medication use
+ht_med = nhanes_ht_ready %>% filter(BPQ100D==1)
+ht_med_no = nhanes_ht_ready %>% filter(BPQ100D==0)
+# Plot distribution
+hist(ht_med$BPXSY1, 
+     main="Distribution of Systolic BP for Group with Medication")
+hist(ht_med_no$BPXSY1, 
+     main="Distribution of Systolic BP for Group with No Medication")
+```
+If we look at the plot of the diastolic BP and systolic BP colored with if taking medication, we do not observe any specific pattern for each group.
+```{r, fig.height = 8, fig.width = 10}
+library(ggplot2)
+# Plot out diastolic BP and systolic BP
+ggplot(data=nhanes_ht_ready)+geom_point(aes(BPXDI1, BPXSY1, 
+                                            color=as.factor(BPQ100D)))+
+  labs(title="Diastolic BP vs Systolic BP")
+```
+If we conduct a Pearson correlation test between the systolic BP and the medication status, the result is not significant with a P-value of 0.5584.
+```{r}
+# Conduct a pearson correlation test
+cor.test(nhanes_ht_ready$BPQ100D, nhanes_ht_ready$BPXSY1)
+```
+
+```{r}
+# Assess the linear relationship between systolic BP and
+# medication use alone
+lm.bp = lm(BPXSY1~BPQ100D,data=nhanes_ht_ready)
+summary(lm.bp)
+```
+To conclude the BP Medication analysis, we do not observe any significant difference between the group who takes medication and the group who does not take the medication, indicating the effect of the medication is not seemingly.
+
+## Conclusion
+In this study, using step-wise iteration selection, we have identified four predictor variables to be included in a linear regression model from ten variables we selected which best captures the variances in systolic blood pressure. The four variables in the selected model included are age, gender, maximum inflation level, and diastolic blood pressure. We have evaluated the performance of the model by RMSE and MAE. We also included different regularized regression full model with lasso penalty, ridge penalty, and elastic net. However, the selected model still outperforms them based on the RMSE and MAE. In the selected model, age has a coefficient with non-significant P-value. We further validate its inclusion in the model using a model without age. We also conducted an analysis specifically on the effect of medication use on the systolic blood pressure level. However, no specific correlation was found.
+
+## Reference
+
+::: {#refs}
+:::

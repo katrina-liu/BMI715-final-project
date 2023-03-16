@@ -1,0 +1,257 @@
+---
+title: "Final Project Code and Figures"
+author: "Katrina Liu"
+date: '2022-12-10'
+output:
+  html_document: default
+  word_document: default
+  pdf_document: default
+bibliography: references.bib
+csl: https://raw.githubusercontent.com/citation-style-language/styles/master/research-institute-for-nature-and-forest.csl
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(MASS)
+```
+
+# BMI 715 Final Project
+
+
+```{r}
+# Loading the NHANES Dataset
+nhanes = read.csv("nhanes_13_14_subset_updated.csv", row.names = "X")
+```
+
+
+## Data Processing and Exploratory Analysis
+
+### Remove Invalid Data Point
+
+
+```{r}
+# Filter the cohort with hypertension
+nhanes_ht = nhanes %>% filter(BPQ020 == 2, BPXDI1>0, BPXSY1>0, RIDAGEYR<80) 
+nhanes_ht_related = nhanes_ht %>% 
+  dplyr::select(c("BMXBMI", "RIDAGEYR", "LBXTC","LBXSGL","LBXSTP",
+                  "BPXSY1","BPXML1","BPXPLS", "BPXDI1", "BPQ100D",
+                                                  "RIAGENDR")) %>% 
+  drop_na %>% mutate(BPQ100D = BPQ100D-1, RIAGENDR = RIAGENDR-1)
+head(nhanes_ht_related)
+```
+
+### Scaling the Predictors
+
+
+```{r}
+# Scale continuous variables
+nhanes_ht_ready = nhanes_ht_related[1:9] %>% scale %>% as.data.frame
+nhanes_ht_ready = cbind(nhanes_ht_ready, nhanes_ht_related[10], 
+                        nhanes_ht_related[11])
+
+```
+
+### Relationships Between Variables
+
+
+```{r, fig.height = 8, fig.width = 10}
+# Plot collinearity and correlation between predictors
+plot(nhanes_ht_ready[,-6], 
+     main="Relationships between Each Pair of Predictors")
+heatmap(cor(nhanes_ht_ready[,-6]),
+        main = "Correlation coefficients of Each Pair of Predictors",Colv=NA, 
+        Rowv=NA)
+
+```
+
+## Linear Regression Model
+
+### Assessing the Relationship between the Predictors and the Outcome
+
+```{r, fig.height = 8, fig.width = 10}
+# Plot collinearity and coefficient of all variables
+plot(nhanes_ht_ready, main="Relationships between Each Pair of Variables")
+```
+
+```{r, fig.height = 8, fig.width = 10}
+# Assees the linear relationship between BPXSY1 and BPXML1
+plot(lm(BPXSY1~BPXML1, data=nhanes_ht_ready))
+```
+
+
+```{r, fig.height = 8, fig.width = 10}
+# Full model
+lm.full = lm(BPXSY1~.,data=nhanes_ht_ready)
+summary(lm.full)
+```
+
+
+```{r, fig.height = 8, fig.width = 10}
+# Assess the full model
+plot(lm.full)
+```
+
+
+### Variable Selection
+
+
+```{r}
+# Base model
+lm.base = lm(BPXSY1~1,data=nhanes_ht_ready)
+summary(lm.base)
+```
+
+```{r}
+# Step-wise model selection
+lm.step =stepAIC(lm.full, scope=list(lm.base, lm.full), direction = "both")
+summary(lm.step)
+```
+
+
+## Evaluate Model Fit
+
+### Plotting the Residuals
+
+```{r, fig.height = 8, fig.width = 10}
+# Residual plot
+plot(fitted(lm.step), resid(lm.step), main="Residual Plot")
+```
+
+
+
+```{r}
+library(Metrics)
+library(caret)
+
+# Partition training/testing data
+random_sample = createDataPartition(nhanes_ht_ready$BPXSY1, p=0.8, list=FALSE)
+training_data = nhanes_ht_ready[seq(random_sample),]
+testing_data = nhanes_ht_ready[-seq(random_sample),]
+
+# Train selected model and predict
+lm.train = lm(BPXSY1~RIDAGEYR+RIAGENDR+BPXDI1+BPXML1, data=training_data)
+predictions = predict(lm.train, testing_data)
+
+# Output results
+data.frame( RMSE = rmse(predictions, testing_data$BPXSY1),
+            MAE = mae(predictions, testing_data$BPXSY1))
+```
+
+
+```{r}
+# Train full model and predict
+lm.train.full = lm(BPXSY1~., data=training_data)
+full_predictions = predict(lm.train.full, testing_data)
+
+data.frame( RMSE = rmse(full_predictions, testing_data$BPXSY1),
+            MAE = mae(full_predictions, testing_data$BPXSY1))
+```
+
+
+## Alternative Models: Regularization
+
+
+```{r, fig.height = 8, fig.width = 10}
+library(glmnet)
+# Process the ht as a matrix
+ht_mat = nhanes_ht_ready %>% as.matrix
+
+# Perform different penalties
+cv_model_lasso = cv.glmnet(ht_mat[,-6], ht_mat[,6], nfolds=10,alpha=1)
+cv_model_ridge = cv.glmnet(ht_mat[,-6], ht_mat[,6], nfolds=10,alpha=0)
+cv_model_elastic = cv.glmnet(ht_mat[,-6], ht_mat[,6], nfolds=10,alpha=0.5)
+
+# Plot the results
+plot(cv_model_lasso, 
+     main="Performance of the Regularized Regression with L1 Penalty")
+plot(cv_model_ridge,
+     main="Performance of the Regularized Regression with L2 Penalty")
+plot(cv_model_elastic, 
+     main="Performance of the Regularized Regression with Elastic Net")
+```
+
+
+```{r}
+train_mat = training_data %>% as.matrix
+test_mat = testing_data %>% as.matrix
+
+# Train regularized regression model with optimal lambda
+cv_final_lasso = glmnet(train_mat[,-6], train_mat[,6], nfolds=10,
+                        alpha=1, lambda=cv_model_lasso$lambda.min)
+cv_final_ridge = glmnet(train_mat[,-6], train_mat[,6], nfolds=10,
+                        alpha=0, lambda=cv_model_ridge$lambda.min)
+cv_final_elastic = glmnet(train_mat[,-6], train_mat[,6], nfolds=10,
+                          alpha=0.5, lambda=cv_model_elastic$lambda.min)
+
+# Predict
+predictions_lasso = cv_final_lasso %>% predict(test_mat[,-6]) %>% as.vector()
+predictions_ridge = cv_final_ridge %>% predict(test_mat[,-6]) %>% as.vector()
+predictions_elastic = cv_final_elastic %>% predict(test_mat[,-6])%>% 
+  as.vector()
+
+# Output results
+data.frame(RMSE = rmse(predictions_lasso, test_mat[,6]), 
+           MAE = mae(predictions_lasso, test_mat[,6]))
+data.frame(RMSE = rmse(predictions_ridge, test_mat[,6]), 
+           MAE = mae(predictions_ridge, test_mat[,6]))
+data.frame(RMSE = rmse(predictions_elastic, test_mat[,6]), 
+           MAE = mae(predictions_elastic, test_mat[,6]))
+```
+
+
+## Follow-up Study:
+
+### Discarding Age Variable
+
+
+```{r}
+# Build model without age
+lm.no_age = lm(BPXSY1~RIAGENDR+BPXDI1+BPXML1, data=nhanes_ht_ready)
+summary(lm.no_age)
+
+# Train and predict
+lm.train.no_age = lm(BPXSY1~RIAGENDR+BPXDI1+BPXML1, data=training_data)
+predictions_no_age = predict(lm.train, testing_data)
+data.frame( RMSE = rmse(predictions_no_age, testing_data$BPXSY1),
+            MAE = mae(predictions_no_age, testing_data$BPXSY1))
+```
+
+
+### Effect of BP Medications
+
+
+```{r, fig.height = 8, fig.width = 10}
+# Separate the cohort by medication use
+ht_med = nhanes_ht_ready %>% filter(BPQ100D==1)
+ht_med_no = nhanes_ht_ready %>% filter(BPQ100D==0)
+# Plot distribution
+hist(ht_med$BPXSY1, 
+     main="Distribution of Systolic BP for Group with Medication")
+hist(ht_med_no$BPXSY1, 
+     main="Distribution of Systolic BP for Group with No Medication")
+```
+
+```{r, fig.height = 8, fig.width = 10}
+library(ggplot2)
+# Plot out diastolic BP and systolic BP
+ggplot(data=nhanes_ht_ready)+geom_point(aes(BPXDI1, BPXSY1, 
+                                            color=as.factor(BPQ100D)))+
+  labs(title="Diastolic BP vs Systolic BP")
+```
+
+```{r}
+# Conduct a pearson correlation test
+cor.test(nhanes_ht_ready$BPQ100D, nhanes_ht_ready$BPXSY1)
+```
+
+```{r}
+# Assess the linear relationship between systolic BP and
+# medication use alone
+lm.bp = lm(BPXSY1~BPQ100D,data=nhanes_ht_ready)
+summary(lm.bp)
+```
+
